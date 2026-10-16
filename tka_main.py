@@ -25,10 +25,22 @@ from tka_engine import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates-tka")
-STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.streamlit.app/")
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.vercel.app/")
 
 app = FastAPI(title="RoboMANTAP TKA Portal")
+SERVICE_NAME = "tka"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+@app.get("/healthz")
+def healthz():
+    """Safe deployment smoke-test endpoint; never returns secret values."""
+    return {
+        "status": "ok",
+        "service": "kuis" if SERVICE_NAME == "kuis" else "tka",
+        "database_configured": bool(os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")),
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY")),
+    }
+
 STUDENT_SESSIONS: dict[str, dict[str, Any]] = {}
 ai_hint_cache: dict[tuple, str] = {}
 

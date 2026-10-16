@@ -1,20 +1,20 @@
-# RoboMANTAP HTMX TKA — Vercel test package
+# RoboMANTAP HTMX TKA — Vercel runtime
 
-Folder ini adalah kandidat deployment terpisah untuk layanan siswa TKA.
+This repository contains only the student-facing FastAPI/HTMX runtime for TKA. It does not modify the main RoboMANTAP repository.
 
-## Penting sebelum dipakai siswa
-- Ini paket uji awal, bukan jaminan siap produksi. Aplikasi memakai sesi ujian dalam memori (`STUDENT_SESSIONS`), yang dapat hilang saat serverless instance berubah/dingin.
-- Harus memakai PostgreSQL yang dapat diakses dari Vercel; set `DATABASE_URL` (atau `POSTGRES_URL`) sebagai Environment Variable. Jangan commit kredensial.
-- Set `GEMINI_API_KEY` atau `GEMINI_API_KEYS` bila endpoint AI hint/generator membutuhkannya.
-- Uji seluruh alur: login/token, mulai ujian, simpan jawaban, heartbeat, anti-cheat, submit, hasil, gambar (TKA), dan AI hint.
-- Vercel Serverless Functions memiliki batas ukuran paket dan batas eksekusi; `pandas` + `matplotlib` + Google GenAI mungkin membuat build terlalu besar/lambat. Bila gagal build atau timeout, gunakan platform ASGI persistent yang cocok, atau refactor dependensi lebih lanjut.
+## Vercel setup
+- Framework Preset: Other
+- Root Directory: `./`
+- Build/Output Command: leave unset (if the dashboard allows it)
+- Environment Variables: `DATABASE_URL`, `GEMINI_API_KEYS` (or `GEMINI_API_KEY`), `STREAMLIT_URL=https://robomantap-intelligence.vercel.app/`
+- Redeploy after changing variables.
 
-## Deploy
-1. Buat repository GitHub terpisah untuk layanan ini, lalu upload isi folder `tka` sebagai root repository (jangan upload folder induk `RoboMANTAP_HTMX_Vercel_Starter`).
-2. Di Vercel: **Add New → Project → Import Git Repository**.
-3. Framework Preset: **Other**. Root Directory: `./` (root repository). Build Command dan Output Directory dikosongkan jika Vercel mengizinkan; Vercel mendeteksi `api/index.py`.
-4. Tambahkan Environment Variables: `DATABASE_URL` (wajib, URL PostgreSQL lengkap), `GEMINI_API_KEY` (jika AI dipakai), dan `STREAMLIT_URL` (opsional untuk link kembali).
-5. Deploy, lalu buka URL proyek. Untuk TKA, endpoint root menampilkan portal TKA; untuk Kuis, portal Kuis.
+`GEMINI_API_KEYS` should be a one-line JSON array, e.g. `["key-one","key-two"]` without the invisible characters shown here; use your real values and never commit them. A single `GEMINI_API_KEY` is also supported.
 
-## Dependency
-`requirements.txt` sengaja hanya memuat dependensi yang tampak diperlukan untuk runtime FastAPI/AI engine. Build harus diverifikasi di Vercel; belum diuji terhadap database produksi.
+## Important
+- The main route is served by FastAPI from `api/index.py`.
+- PostgreSQL must be reachable from Vercel. Do not commit `.env` or credentials.
+- Current session dictionaries are still in memory. This package is for deployment testing, not yet production-safe for concurrent/high-stakes exams until session state is persisted and load-tested.
+
+## Smoke test
+After deployment, open `/healthz`. It should return `status: ok` and only boolean flags for configured environment variables. If `/healthz` returns FastAPI 404, check the Vercel function routing/build log.
