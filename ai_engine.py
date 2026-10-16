@@ -160,6 +160,12 @@ def _stream_from_clients(prompt: str, max_output_tokens: int):
         "Silakan coba klik lagi ya!"
     )
 
+# Label opsi jawaban yang dipakai bersama oleh Kuis dan TKA.
+# MTs menggunakan empat opsi (A-D), sedangkan MA menggunakan lima opsi (A-E).
+OPTION_LABELS_MTS = ("A", "B", "C", "D")
+OPTION_LABELS_MA = ("A", "B", "C", "D", "E")
+
+
 def option_labels_for_jenjang(jenjang: str) -> tuple[str, ...]:
     """MTs -> A-D, MA -> A-E. Default aman mengikuti MTs untuk jenjang tidak dikenal."""
     value = str(jenjang or "").strip().lower()
