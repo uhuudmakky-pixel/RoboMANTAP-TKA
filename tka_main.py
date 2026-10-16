@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -184,7 +185,17 @@ async def mandiri_start(
     
     # Latihan Mandiri: tepat 15 soal / 75 menit. Gambar stimulus opsional;
     # generator internal membagi request AI agar tidak meminta 15 soal campuran sekaligus.
-    questions = generate_tka_30(jenjang=jenjang, mapel=mapel, auto_select_images=True)
+    print(f"[TKA MANDIRI] phase=generate begin jenjang={jenjang} mapel={mapel}", flush=True)
+    try:
+        questions = generate_tka_30(jenjang=jenjang, mapel=mapel, auto_select_images=True)
+        print(f"[TKA MANDIRI] phase=generate done count={len(questions) if questions is not None else 'None'}", flush=True)
+    except Exception as exc:
+        print(f"[TKA MANDIRI] phase=generate exception={type(exc).__name__}: {exc}", flush=True)
+        traceback.print_exc()
+        return templates.TemplateResponse(request=request, name="student_login.html", context={
+            "error": "⚠️ Generator TKA mengalami kendala. Silakan coba kembali; pengelola dapat memeriksa log server untuk detail teknis.",
+            "mode": "mandiri",
+        }, status_code=500)
     if len(questions) != TKA_TOTAL_QUESTIONS:
         print(
             f"[TKA MANDIRI] Paket gagal dibuat untuk {jenjang}/{mapel}: "
@@ -212,11 +223,23 @@ async def mandiri_start(
         "anti_cheat": {"detected": False, "reason": "", "violation_count": 0, "max_violations": 3},
         "finished": False,
     }
-    update_tka_progress(
-        session_id=session_id, nama=nama.strip(), jenjang=jenjang, mapel=mapel.strip(),
-        soal_sekarang=1, detail_jawaban=[None] * TKA_TOTAL_QUESTIONS,
-        questions=questions, status="BERJALAN",
-    )
+    print(f"[TKA MANDIRI] phase=save_progress begin session={session_id}", flush=True)
+    try:
+        update_tka_progress(
+            session_id=session_id, nama=nama.strip(), jenjang=jenjang, mapel=mapel.strip(),
+            soal_sekarang=1, detail_jawaban=[None] * TKA_TOTAL_QUESTIONS,
+            questions=questions, status="BERJALAN",
+        )
+        print(f"[TKA MANDIRI] phase=save_progress done session={session_id}", flush=True)
+    except Exception as exc:
+        print(f"[TKA MANDIRI] phase=save_progress exception={type(exc).__name__}: {exc}", flush=True)
+        traceback.print_exc()
+        STUDENT_SESSIONS.pop(session_id, None)
+        return templates.TemplateResponse(request=request, name="student_login.html", context={
+            "error": "⚠️ Soal berhasil disiapkan, tetapi sesi ujian gagal disimpan. Silakan coba kembali; jika berulang, hubungi pengelola.",
+            "mode": "mandiri",
+        }, status_code=500)
+    print(f"[TKA MANDIRI] phase=render_exam begin session={session_id}", flush=True)
     return await render_exam(request, session_id)
 
 @app.post("/verify-token", response_class=HTMLResponse)
