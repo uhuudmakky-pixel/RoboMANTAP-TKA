@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import os
 import uuid
-import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from sqlalchemy import text
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -27,98 +25,21 @@ from tka_engine import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates-tka")
-STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.vercel.app/")
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.streamlit.app/")
 
 app = FastAPI(title="RoboMANTAP TKA Portal")
-SERVICE_NAME = "tka"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
-
-@app.get("/healthz")
-def healthz():
-    """Safe deployment smoke-test endpoint; never returns secret values."""
-    return {
-        "status": "ok",
-        "service": "kuis" if SERVICE_NAME == "kuis" else "tka",
-        "database_configured": bool(os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")),
-        "gemini_configured": bool(os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY")),
-    }
-
 STUDENT_SESSIONS: dict[str, dict[str, Any]] = {}
 ai_hint_cache: dict[tuple, str] = {}
-
-
-def get_student_session(session_id: str) -> dict[str, Any] | None:
-    """Get local session or restore it from PostgreSQL after a Vercel cold start.
-
-    Student progress is already stored by update_tka_progress in sesi_ujian;
-    this reconstructs the minimum runtime state from that durable record.
-    """
-    cached = STUDENT_SESSIONS.get(session_id)
-    if cached is not None:
-        return cached
-    try:
-        from ai_engine import init_db_connection
-        conn = init_db_connection()
-        if not conn:
-            return None
-        with conn.session as db:
-            row = db.execute(text("""
-                SELECT nama_siswa, jenjang, mapel, soal_sekarang, detail_jawaban,
-                       status, created_at
-                FROM sesi_ujian WHERE id_sesi = :sid LIMIT 1
-            """), {"sid": session_id}).mappings().first()
-        if not row:
-            return None
-        payload = row.get("detail_jawaban")
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                payload = {}
-        if not isinstance(payload, dict) or payload.get("activity_type") != "TKA":
-            return None
-        quiz = payload.get("quiz_data") or []
-        if not isinstance(quiz, list) or not quiz:
-            return None
-        answers = payload.get("user_answers") or {}
-        if not isinstance(answers, dict):
-            answers = {}
-        # created_at is saved as WIB-naive by update_tka_progress.
-        created = row.get("created_at")
-        if isinstance(created, str):
-            created = parse_wib_datetime(created)
-        if not isinstance(created, datetime):
-            created = now_wib()
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone(timedelta(hours=7))).astimezone(timezone.utc)
-        config = {
-            "jenis": "TKA", "mode": "GURU", "jenjang": normalize_tka_jenjang(row.get("jenjang") or "MTs"),
-            "mapel": str(row.get("mapel") or "TKA").replace(" (TKA)", ""),
-            "timer_seconds": TKA_DEFAULT_DURATION_SECONDS, "total_soal": len(quiz),
-        }
-        sess = {
-            "nama": str(row.get("nama_siswa") or "Siswa"), "kelas": "-", "absen": "-",
-            "config": config, "quiz": quiz, "answers": answers,
-            "current_index": max(0, int(row.get("soal_sekarang") or 1) - 1),
-            "start_time": created, "anti_cheat": payload.get("anti_cheat") or {
-                "detected": False, "reason": "", "violation_count": 0, "max_violations": 3
-            },
-            "finished": str(row.get("status") or "").upper() in {"SELESAI", "TRIAL", "ARCHIVED"},
-        }
-        STUDENT_SESSIONS[session_id] = sess
-        return sess
-    except Exception as exc:
-        print(f"[TKA SESSION RESTORE] {type(exc).__name__}: {exc}", flush=True)
-        return None
 
 TKA_MTS_MAPELS = {"Bahasa Indonesia", "Matematika"}
 TKA_MA_MAPELS = {
     "Bahasa Indonesia", "Matematika", "Bahasa Inggris",
     "Matematika Lanjutan", "Bahasa Indonesia Lanjutan", "Bahasa Inggris Lanjutan",
     "Fisika", "Kimia", "Biologi", "Ekonomi", "Sosiologi", "Geografi", "Sejarah",
-    "Antropologi", "PPKn / Pendidikan Pancasila", "Bahasa Arab", "Bahasa Jerman",
+    "Antropologi", "PPKn/Pendidikan Pancasila", "Bahasa Arab", "Bahasa Jerman",
     "Bahasa Prancis", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin",
-    "Produk / Projek Kreatif dan Kewirausahaan",
+    "Produk/Projek Kreatif dan Kewirausahaan",
 }
 
 try:
@@ -251,17 +172,7 @@ async def mandiri_start(
     
     # Latihan Mandiri: tepat 15 soal / 75 menit. Gambar stimulus opsional;
     # generator internal membagi request AI agar tidak meminta 15 soal campuran sekaligus.
-    print(f"[TKA MANDIRI] phase=generate begin jenjang={jenjang} mapel={mapel}", flush=True)
-    try:
-        questions = generate_tka_30(jenjang=jenjang, mapel=mapel, auto_select_images=True)
-        print(f"[TKA MANDIRI] phase=generate done count={len(questions) if questions is not None else 'None'}", flush=True)
-    except Exception as exc:
-        print(f"[TKA MANDIRI] phase=generate exception={type(exc).__name__}: {exc}", flush=True)
-        traceback.print_exc()
-        return templates.TemplateResponse(request=request, name="student_login.html", context={
-            "error": "⚠️ Generator TKA mengalami kendala. Silakan coba kembali; pengelola dapat memeriksa log server untuk detail teknis.",
-            "mode": "mandiri",
-        }, status_code=500)
+    questions = generate_tka_30(jenjang=jenjang, mapel=mapel, auto_select_images=True)
     if len(questions) != TKA_TOTAL_QUESTIONS:
         print(
             f"[TKA MANDIRI] Paket gagal dibuat untuk {jenjang}/{mapel}: "
@@ -289,23 +200,11 @@ async def mandiri_start(
         "anti_cheat": {"detected": False, "reason": "", "violation_count": 0, "max_violations": 3},
         "finished": False,
     }
-    print(f"[TKA MANDIRI] phase=save_progress begin session={session_id}", flush=True)
-    try:
-        update_tka_progress(
-            session_id=session_id, nama=nama.strip(), jenjang=jenjang, mapel=mapel.strip(),
-            soal_sekarang=1, detail_jawaban=[None] * TKA_TOTAL_QUESTIONS,
-            questions=questions, status="BERJALAN",
-        )
-        print(f"[TKA MANDIRI] phase=save_progress done session={session_id}", flush=True)
-    except Exception as exc:
-        print(f"[TKA MANDIRI] phase=save_progress exception={type(exc).__name__}: {exc}", flush=True)
-        traceback.print_exc()
-        STUDENT_SESSIONS.pop(session_id, None)
-        return templates.TemplateResponse(request=request, name="student_login.html", context={
-            "error": "⚠️ Soal berhasil disiapkan, tetapi sesi ujian gagal disimpan. Silakan coba kembali; jika berulang, hubungi pengelola.",
-            "mode": "mandiri",
-        }, status_code=500)
-    print(f"[TKA MANDIRI] phase=render_exam begin session={session_id}", flush=True)
+    update_tka_progress(
+        session_id=session_id, nama=nama.strip(), jenjang=jenjang, mapel=mapel.strip(),
+        soal_sekarang=1, detail_jawaban=[None] * TKA_TOTAL_QUESTIONS,
+        questions=questions, status="BERJALAN",
+    )
     return await render_exam(request, session_id)
 
 @app.post("/verify-token", response_class=HTMLResponse)
@@ -351,7 +250,7 @@ async def verify_token(
     return await render_exam(request, session_id)
 
 async def render_exam(request: Request, session_id: str):
-    sess = get_student_session(session_id)
+    sess = STUDENT_SESSIONS.get(session_id)
     if not sess:
         return RedirectResponse(url="/", status_code=303)
     if sess.get("finished") or normalized_anti_cheat(sess)["detected"]:
@@ -398,7 +297,7 @@ async def image_api(image_id: str):
 
 @app.post("/api/save-answer")
 async def save_answer(session_id: str = Form(...), q_index: int = Form(...), answer: str = Form(...)):
-    sess = get_student_session(session_id)
+    sess = STUDENT_SESSIONS.get(session_id)
     if not sess or sess.get("finished"):
         return Response(status_code=409)
     config = sess.get("config", {})
@@ -443,16 +342,15 @@ async def save_answer(session_id: str = Form(...), q_index: int = Form(...), ans
 
 @app.post("/api/session-heartbeat")
 async def heartbeat(session_id: str = Form(...)):
-    sess = get_student_session(session_id)
-    if not sess:
+    if session_id not in STUDENT_SESSIONS:
         return Response(status_code=404)
-    if not sess.get("finished"):
+    if not STUDENT_SESSIONS[session_id].get("finished"):
         touch_tka_heartbeat(session_id)
     return Response(status_code=204)
 
 @app.post("/api/anti-cheat")
 async def anti_cheat(session_id: str = Form(...), violation_count: int = Form(0), reason: str = Form("Pindah tab")):
-    sess = get_student_session(session_id)
+    sess = STUDENT_SESSIONS.get(session_id)
     if not sess:
         return Response(status_code=404)
     meta = normalized_anti_cheat(sess)
@@ -482,7 +380,7 @@ async def submit_exam(
     anti_cheat_reason: str = Form(""),
     anti_cheat_count: int = Form(0),
 ):
-    sess = get_student_session(session_id)
+    sess = STUDENT_SESSIONS.get(session_id)
     if not sess:
         return RedirectResponse(url="/", status_code=303)
     quiz = sess.get("quiz", []) or []
