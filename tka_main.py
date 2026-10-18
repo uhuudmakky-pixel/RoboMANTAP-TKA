@@ -25,7 +25,7 @@ from tka_engine import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates-tka")
-STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.streamlit.app/")
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "https://robomantap-intelligence.vercel.app/")
 
 app = FastAPI(title="RoboMANTAP TKA Portal")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
